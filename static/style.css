@@ -221,3 +221,107 @@ border-radius: 0 0 15px 15px !important;
 	margin-bottom: 15px !important;
 }
 }
+.chat { height: 80vh; }
+.msg_card_body { overflow-y: auto; height: 60vh; }
+.msg_cotainer, .msg_cotainer_send { padding: 10px; border-radius: 10px; }
+.msg_cotainer { background-color: #eee; }
+.msg_cotainer_send { background-color: #0084ff; color: #fff; }
+/* ------------------- Typing Animation ------------------- */
+/* ------------------- Typing Animation (Modern Style) ------------------- */
+.thinking-bubble {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: white;
+    border-radius: 20px;
+    padding: 10px 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 70px;
+    font-style: italic;
+    font-size: 14px;
+    position: relative;
+    animation: fadeIn 0.4s ease-in-out;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+}
+
+.thinking-bubble .dot {
+    width: 6px;
+    height: 6px;
+    background-color: #fff;
+    border-radius: 50%;
+    margin: 0 3px;
+    opacity: 0.5;
+    animation: blink 1.4s infinite;
+}
+
+.thinking-bubble .dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-bubble .dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink {
+    0% { opacity: 0.2; transform: translateY(0px); }
+    50% { opacity: 1; transform: translateY(-3px); }
+    100% { opacity: 0.2; transform: translateY(0px); }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+}
+/* ChatGPT-style blinking cursor */
+.typed-text::after {
+    content: "▋";
+    animation: blinkCursor 0.8s infinite;
+    color: rgba(255,255,255,0.6);
+    margin-left: 2px;
+}
+
+@keyframes blinkCursor {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
+}
+/* Modal overlay */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    animation: fadeIn 0.3s ease forwards;
+}
+
+/* Modal content */
+.modal-content {
+    background: white;
+    padding: 25px 30px;
+    border-radius: 12px;
+    text-align: center;
+    width: 90%;
+    max-width: 400px;
+    transform: scale(0.7);
+    animation: scaleUp 0.3s ease forwards;
+}
+
+/* Buttons */
+.modal-buttons {
+    margin-top: 20px;
+    display: flex;
+    justify-content: space-around;
+}
+
+.modal-buttons button {
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; } to { opacity: 1; }
+}
+@keyframes scaleUp {
+    from { transform: scale(0.7); } to { transform: scale(1); }
+}
+

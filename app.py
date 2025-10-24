@@ -1,138 +1,81 @@
-from flask import Flask, render_template, jsonify, request, session
-from src.helper import download_embeddings, get_session_history
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import ChatOpenAI
-from langchain.chains import create_retrieval_chain, create_history_aware_retriever
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core.prompts.chat import SystemMessagePromptTemplate, HumanMessagePromptTemplate, MessagesPlaceholder
-from langchain.agents import initialize_agent, AgentType, Tool
-from dotenv import load_dotenv
-from src.prompt import *
-import os
+from flask import Flask, render_template, jsonify, request, session, make_response
+from db_utils import *
+from rag_utils import agent_with_history
 import uuid
 
-
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "my_super_secret_key_for_testing")  # <-- HERE
+app.secret_key = "my_secret_key"
+init_db()
 
+@app.route("/")
+def index():
+    return render_template("chat.html")
 
-load_dotenv()
+# --- Chat management routes ---
+@app.route("/new_chat", methods=["POST"])
+def new_chat():
+    session_id = str(uuid.uuid4())
+    save_session(session_id)
+    resp = make_response(jsonify({"session_id": session_id}))
+    resp.set_cookie("session_id", session_id)
+    return resp
 
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+@app.route("/sessions", methods=["GET"])
+def list_sessions_route():
+    return jsonify({"sessions": get_sessions()})
 
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
+@app.route("/delete_chat/<session_id>", methods=["DELETE"])
+def delete_chat_route(session_id):
+    delete_session(session_id)
+    resp = jsonify({"status": "ok"})
+    if request.cookies.get("session_id") == session_id:
+        resp.set_cookie("session_id", "", expires=0)
+    return resp
 
-embeddings = download_embeddings()
+@app.route("/history/<session_id>", methods=["GET"])
+def history_route(session_id):
+    return jsonify(get_messages(session_id))
 
-index_name = "medical-chatbot"
-# Load the existing index
+@app.route("/rename_chat/<session_id>", methods=["POST"])
+def rename_chat_route(session_id):
+    new_name = request.form.get("name", "").strip()
+    if session_id and new_name:
+        save_session(session_id, name=new_name)
+        return jsonify({"status": "ok", "name": new_name})
+    return jsonify({"status": "error", "message": "Invalid session or name"}), 400
 
-docsearch = PineconeVectorStore.from_existing_index(
-    index_name=index_name,
-    embedding=embeddings
-)
+@app.route("/get", methods=["POST"])
+def chat_route():
+    session_id = request.cookies.get("session_id") or str(uuid.uuid4())
+    user_input = request.form.get("msg", "").strip()
+    if not user_input:
+        return ""
 
-retriever = docsearch.as_retriever(search_type = "similarity", search_kwargs = {"k":3})
+    # Only update last_active, do NOT overwrite the name
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?", (datetime.utcnow(), session_id))
+    conn.commit()
+    conn.close()
 
-chat_model = ChatOpenAI(model = "gpt-4o")
-prompt = ChatPromptTemplate.from_messages([
-    SystemMessagePromptTemplate.from_template(system_prompt),
-    MessagesPlaceholder(variable_name="chat_history"),
-    HumanMessagePromptTemplate.from_template("{input}")
-])
+    save_message(session_id, "human", user_input)
 
-# Define the contextualize prompt properly
-contextualize_q_prompt = ChatPromptTemplate.from_messages([
-    SystemMessagePromptTemplate.from_template(
-        "Given a chat history and the latest user question, "
-        "reformulate the question as a standalone question without answering it."
-    ),
-    MessagesPlaceholder(variable_name="chat_history"),
-    HumanMessagePromptTemplate.from_template("{input}")
-])
-
-history_aware_retriever = create_history_aware_retriever(
-    llm=chat_model,
-    retriever=retriever,
-    prompt = contextualize_q_prompt
-)
-
-question_answer_chain = create_stuff_documents_chain(chat_model,prompt)
-rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-store = {}
-conversational_rag_chain = RunnableWithMessageHistory(
-    rag_chain,
-    get_session_history,
-    input_messages_key="input",
-    history_messages_key="chat_history",
-    output_messages_key="answer"
-)
-rag_tool = Tool(
-    name="Medical_RAG",
-    func=lambda query: conversational_rag_chain.invoke(
-        {"input": query},
-        config={"configurable": {"session_id": "agent_session"}}
-    )["answer"],
-    description="Answer medical questions using the knowledge base."
-)
-agent = initialize_agent(
-    tools=[rag_tool],
-    llm=chat_model,
-    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=False,
-)
-
-agent_with_history = RunnableWithMessageHistory(
-    agent,
-    get_session_history,
-    input_messages_key="input",
-    history_messages_key="chat_history",
-    output_messages_key="output"
-)
-@app.route("/get", methods=["GET","POST"])
-def chat():
-    if "session_id" not in session:
-        session["session_id"] = str(uuid.uuid4())
-    session_id = session["session_id"]
-
-    user_input = request.form["msg"].strip()
-    print("User input:", user_input)
-
-    # Handle greetings
-    greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]
-    if user_input.lower() in greetings:
-        return "Hello! I am your medical assistant. How can I help you today?"
-
-    # Handle RAG queries
     try:
         response = agent_with_history.invoke(
             {"input": user_input},
             config={"configurable": {"session_id": session_id}},
             handle_parsing_errors=True
         )
-        # Extract only the final answer
-        answer = response.get("output", "")
-    
+        answer = response.get("answer") or response.get("output") or str(response)
+        if not answer.strip():
+            answer = "I’m here to help with medical questions. Could you please ask a medical-related question?"
     except Exception as e:
-        # Extract just the message about needing more context
-        msg = str(e)
-        if "The question is not specific enough" in msg:
-            answer = "The question is not specific enough to determine what condition 'that' refers to. " \
-                     "Please provide additional context so I can assist you effectively."
-        else:
-            answer = "⚠️ An error occurred. Please provide additional context or clarify the question."
+        print("Error in /get:", e)
+        answer = "I’m here to help with medical questions. Could you please ask a medical-related question?"
 
-    print("Agent answer:", answer)
+    save_message(session_id, "ai", answer)
     return str(answer)
 
 
-@app.route("/")
-def index():
-    return render_template('chat.html')
-
-if __name__=='__main__':
-    app.run(host="0.0.0.0", port=8080, debug= True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080, debug=True)
