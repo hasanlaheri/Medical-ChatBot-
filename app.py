@@ -9,52 +9,104 @@ init_db()
 
 @app.route("/")
 def index():
-    return render_template("chat.html")
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        user_id = str(uuid.uuid4())
+    resp = make_response(render_template("chat.html"))
+    resp.set_cookie("user_id", user_id)
+    return resp
+
+@app.route("/whoami", methods=["GET"])
+def whoami():
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        user_id = str(uuid.uuid4())[:4]  # Short 4-character ID
+    resp = jsonify({"user_id": user_id})
+    resp.set_cookie("user_id", user_id)
+    return resp
+
 
 # --- Chat management routes ---
 @app.route("/new_chat", methods=["POST"])
 def new_chat():
+    user_id = request.cookies.get("user_id")
     session_id = str(uuid.uuid4())
-    save_session(session_id)
+    save_session(session_id, user_id=user_id)
     resp = make_response(jsonify({"session_id": session_id}))
     resp.set_cookie("session_id", session_id)
     return resp
 
+
 @app.route("/sessions", methods=["GET"])
 def list_sessions_route():
-    return jsonify({"sessions": get_sessions()})
+    user_id = request.cookies.get("user_id")
+    return jsonify({"sessions": get_sessions(user_id)})
+
 
 @app.route("/delete_chat/<session_id>", methods=["DELETE"])
 def delete_chat_route(session_id):
-    delete_session(session_id)
+    user_id = request.cookies.get("user_id")
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    # Delete messages only if session belongs to this user
+    c.execute("DELETE FROM messages WHERE session_id=? AND session_id IN (SELECT session_id FROM sessions WHERE user_id=?)", (session_id, user_id))
+    c.execute("DELETE FROM sessions WHERE session_id=? AND user_id=?", (session_id, user_id))
+    conn.commit()
+    conn.close()
+
     resp = jsonify({"status": "ok"})
     if request.cookies.get("session_id") == session_id:
         resp.set_cookie("session_id", "", expires=0)
     return resp
 
+
 @app.route("/history/<session_id>", methods=["GET"])
 def history_route(session_id):
-    return jsonify(get_messages(session_id))
+    user_id = request.cookies.get("user_id")
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    # Only fetch messages for sessions that belong to this user
+    c.execute("""
+        SELECT type, content FROM messages
+        WHERE session_id=? AND session_id IN (SELECT session_id FROM sessions WHERE user_id=?)
+        ORDER BY timestamp
+    """, (session_id, user_id))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{"type": r[0], "content": r[1]} for r in rows])
+
 
 @app.route("/rename_chat/<session_id>", methods=["POST"])
 def rename_chat_route(session_id):
+    user_id = request.cookies.get("user_id")
     new_name = request.form.get("name", "").strip()
     if session_id and new_name:
-        save_session(session_id, name=new_name)
+        save_session(session_id, name=new_name, user_id=user_id)
         return jsonify({"status": "ok", "name": new_name})
     return jsonify({"status": "error", "message": "Invalid session or name"}), 400
 
+
 @app.route("/get", methods=["POST"])
 def chat_route():
-    session_id = request.cookies.get("session_id") or str(uuid.uuid4())
+    session_id = request.cookies.get("session_id")
+    user_id = request.cookies.get("user_id")
+    
+    # Verify session belongs to user
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM sessions WHERE session_id=? AND user_id=?", (session_id, user_id))
+    if not c.fetchone():
+        return jsonify({"error": "Unauthorized"}), 401
+    conn.close()
+
     user_input = request.form.get("msg", "").strip()
     if not user_input:
         return ""
 
-    # Only update last_active, do NOT overwrite the name
+    # Update last_active
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?", (datetime.utcnow(), session_id))
+    c.execute("UPDATE sessions SET last_active=? WHERE session_id=? AND user_id=?", (datetime.utcnow(), session_id, user_id))
     conn.commit()
     conn.close()
 
@@ -75,6 +127,7 @@ def chat_route():
 
     save_message(session_id, "ai", answer)
     return str(answer)
+
 
 
 if __name__ == "__main__":

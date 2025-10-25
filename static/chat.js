@@ -1,6 +1,42 @@
 $(document).ready(function() {
     let session_id = getCookie("session_id"); // current session
     let nameSetMap = {}; // tracks which sessions have custom names
+// ------------------- Sidebar User ID Editable -------------------
+function setupUserIdDisplay() {
+    const userIdSpan = document.getElementById("userIdDisplay");
+    const editIcon = document.getElementById("editUserId");
+
+    // Load display from cookie if exists
+    const savedDisplay = getCookie("user_display");
+    if (savedDisplay) userIdSpan.textContent = savedDisplay;
+
+    const enableEdit = () => {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = userIdSpan.textContent;
+        input.classList.add("form-control", "form-control-sm");
+        userIdSpan.replaceWith(input);
+        editIcon.style.display = "none";
+        input.focus();
+
+        const saveDisplay = () => {
+            const newText = input.value.trim() || "User";
+            input.replaceWith(userIdSpan);
+            userIdSpan.textContent = newText;
+            editIcon.style.display = "inline-block";
+            setCookie("user_display", newText, 365); // persist for 1 year
+        };
+
+        input.addEventListener("keypress", (e) => { if (e.key === "Enter") saveDisplay(); });
+        input.addEventListener("blur", saveDisplay);
+    };
+
+    // userIdSpan.addEventListener("click", enableEdit);
+    editIcon.addEventListener("click", enableEdit);
+}
+
+setupUserIdDisplay();
+
 
     // ------------------- Initialize -------------------
     async function initSession() {
@@ -242,18 +278,18 @@ $(document).ready(function() {
     });
 
     // ------------------- Cookie Helpers -------------------
-    function setCookie(name, value, days) {
-        const d = new Date();
-        d.setTime(d.getTime() + (days*24*60*60*1000));
-        document.cookie = name + "=" + value + ";path=/;expires=" + d.toUTCString();
-    }
+function setCookie(name, value, days) {
+    const d = new Date();
+    d.setTime(d.getTime() + (days*24*60*60*1000));
+    document.cookie = name + "=" + encodeURIComponent(value) + ";path=/;expires=" + d.toUTCString();
+}
 
-    function getCookie(name) {
-        const value = "; " + document.cookie;
-        const parts = value.split("; " + name + "=");
-        if (parts.length === 2) return parts.pop().split(";").shift();
-        return null;
-    }
+function getCookie(name) {
+    const value = "; " + document.cookie;
+    const parts = value.split("; " + name + "=");
+    if (parts.length === 2) return decodeURIComponent(parts.pop().split(";").shift());
+    return null;
+}
 
     function deleteCookie(name) {
         document.cookie = name +'=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';

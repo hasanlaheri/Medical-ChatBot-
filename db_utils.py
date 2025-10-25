@@ -22,25 +22,23 @@ def init_db():
     conn.commit()
     conn.close()
     
-def save_session(session_id, name=None):
+def save_session(session_id, name=None, user_id=None):
     now = datetime.utcnow()
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    
-    # Insert if not exists
-    c.execute("INSERT OR IGNORE INTO sessions (session_id, name, last_active) VALUES (?, ?, ?)",
-              (session_id, name, now))
-    
-    # Only update name if provided
+    c.execute("""
+        INSERT OR IGNORE INTO sessions (session_id, name, last_active, user_id)
+        VALUES (?, ?, ?, ?)
+    """, (session_id, name, now, user_id))
     if name is not None:
-        c.execute("UPDATE sessions SET last_active = ?, name = ? WHERE session_id = ?",
-                  (now, name, session_id))
+        c.execute("UPDATE sessions SET last_active = ?, name = ? WHERE session_id = ? AND user_id = ?",
+                  (now, name, session_id, user_id))
     else:
-        c.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?",
-                  (now, session_id))
-    
+        c.execute("UPDATE sessions SET last_active = ? WHERE session_id = ? AND user_id = ?",
+                  (now, session_id, user_id))
     conn.commit()
     conn.close()
+
 
 
 
@@ -63,13 +61,14 @@ def get_messages(session_id):
     conn.close()
     return [{"type": row[0], "content": row[1]} for row in rows]
 
-def get_sessions():
+def get_sessions(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT session_id, name FROM sessions ORDER BY last_active DESC")
+    c.execute("SELECT session_id, name FROM sessions WHERE user_id = ? ORDER BY last_active DESC", (user_id,))
     rows = c.fetchall()
     conn.close()
     return [{"id": row[0], "name": row[1] or "New Chat"} for row in rows]
+
 
 def delete_session(session_id):
     conn = sqlite3.connect(DB_FILE)
