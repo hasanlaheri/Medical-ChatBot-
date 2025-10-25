@@ -11,7 +11,7 @@ system_prompt = (
     "Do not make up answers. "
     "Always keep responses concise, friendly, and within seven sentences. "
     "\n\n"
-    "{context}"
+    "{context}."
 )
 
 
